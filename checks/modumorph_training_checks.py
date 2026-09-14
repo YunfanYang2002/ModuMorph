@@ -49,6 +49,9 @@ def immutable_native_source():
 
 
 class MockModel:
+    nv = nu = nbody = ngeom = nsite = nsensordata = 1
+    nmocap = nuserdata = 0
+
     def get_mjb(self):
         return b"MOCK-model-not-MuJoCo"
 
@@ -272,6 +275,185 @@ class TrainingChecks(unittest.TestCase):
         env.viewer = object()
         with self.assertRaisesRegex(ValueError, "active render viewers"):
             snapshot.capture(env)
+
+    def optional_sim(self):
+        sim = MockSim()
+        for key in ("mocap_pos", "mocap_quat", "userdata"):
+            setattr(sim.data, key, None)
+        return sim
+
+    def test_snapshot_none_capture(self):
+        sim = self.optional_sim()
+        integration = snapshot.capture_integration(sim)
+        self.assertEqual({key for key, value in integration.items() if value is None},
+                         {"mocap_pos", "mocap_quat", "userdata"})
+        env = MockEnv()
+        env.sim = sim
+        self.assertIsNone(snapshot.capture(env)["integration"]["userdata"])
+
+    def test_snapshot_array_independent_copy(self):
+        sim = self.optional_sim()
+        sim.data.ctrl = np.arange(4., dtype=np.float64).reshape(2, 2)
+        saved = snapshot.capture_integration(sim)["ctrl"]
+        self.assertFalse(np.shares_memory(saved, sim.data.ctrl))
+        sim.data.ctrl[0, 0] = 99.
+        self.assertEqual(saved[0, 0], 0.)
+        saved[1, 1] = -20.
+        self.assertEqual(sim.data.ctrl[1, 1], 3.)
+
+    def test_snapshot_scalar_capture(self):
+        sim = self.optional_sim()
+        sim.data.ctrl = 1.25
+        sim.data.qacc = np.float32(2.5)
+        integration = snapshot.capture_integration(sim)
+        self.assertEqual(integration["ctrl"], 1.25)
+        self.assertIs(type(integration["ctrl"]), float)
+        self.assertIs(type(integration["qacc"]), np.float32)
+
+    def test_restore_none_to_none(self):
+        sim = self.optional_sim()
+        saved = snapshot.capture_integration(sim)
+        snapshot.restore_integration(sim, saved)
+        for key in ("mocap_pos", "mocap_quat", "userdata"):
+            self.assertIsNone(getattr(sim.data, key))
+
+    def test_restore_array_exact(self):
+        sim = self.optional_sim()
+        sim.data.ctrl = np.array([[1.5, -0.0], [3.25, 4.]], dtype=np.float32)
+        saved = snapshot.capture_integration(sim)
+        sim.data.ctrl[:] = 99.
+        snapshot.restore_integration(sim, saved)
+        self.assertEqual(sim.data.ctrl.dtype, np.dtype("float32"))
+        self.assertEqual(sim.data.ctrl.tobytes(), saved["ctrl"].tobytes())
+
+    def test_restore_scalar_exact(self):
+        sim = self.optional_sim()
+        sim.data.ctrl, sim.data.qacc = 1.25, np.float32(2.5)
+        saved = snapshot.capture_integration(sim)
+        sim.data.ctrl, sim.data.qacc = -9., np.float32(-4.)
+        snapshot.restore_integration(sim, saved)
+        self.assertEqual(sim.data.ctrl, 1.25)
+        self.assertIs(type(sim.data.ctrl), float)
+        self.assertEqual(sim.data.qacc.tobytes(), saved["qacc"].tobytes())
+
+    def test_restore_none_to_value_rejected(self):
+        sim = self.optional_sim()
+        saved = snapshot.capture_integration(sim)
+        sim.data.userdata = np.zeros(0)
+        with self.assertRaisesRegex(ValueError, "userdata None/value"):
+            snapshot.restore_integration(sim, saved)
+
+    def test_restore_value_to_none_rejected(self):
+        sim = self.optional_sim()
+        sim.data.userdata = np.zeros(0)
+        saved = snapshot.capture_integration(sim)
+        sim.data.userdata = None
+        with self.assertRaisesRegex(ValueError, "userdata None/value"):
+            snapshot.restore_integration(sim, saved)
+
+    def test_restore_shape_mismatch_rejected(self):
+        sim = self.optional_sim()
+        saved = snapshot.capture_integration(sim)
+        sim.data.ctrl = np.zeros((1, 1))
+        with self.assertRaisesRegex(ValueError, "ctrl shape mismatch"):
+            snapshot.restore_integration(sim, saved)
+
+    def test_restore_dtype_and_representation_mismatch_rejected(self):
+        sim = self.optional_sim()
+        saved = snapshot.capture_integration(sim)
+        sim.data.ctrl = np.zeros(1, dtype=np.float32)
+        with self.assertRaisesRegex(TypeError, "ctrl dtype mismatch"):
+            snapshot.restore_integration(sim, saved)
+        sim.data.ctrl = [0.]
+        with self.assertRaisesRegex(TypeError, "ctrl representation mismatch"):
+            snapshot.restore_integration(sim, saved)
+        sim.data.ctrl = 1.25
+        saved = snapshot.capture_integration(sim)
+        sim.data.ctrl = np.float64(0.)
+        with self.assertRaisesRegex(TypeError, "ctrl representation mismatch"):
+            snapshot.restore_integration(sim, saved)
+
+    def test_unexpected_none_and_missing_field_rejected(self):
+        sim = self.optional_sim()
+        sim.data.ctrl = None
+        with self.assertRaisesRegex(ValueError, "ctrl.*model.nu=1"):
+            snapshot.capture_integration(sim)
+        integration = {key: getattr(sim.data, key) for key in snapshot.FIELDS}
+        with self.assertRaisesRegex(ValueError, "ctrl.*model.nu=1"):
+            snapshot.restore_integration(sim, integration)
+        del sim.data.ctrl
+        with self.assertRaisesRegex(AttributeError, "ctrl"):
+            snapshot.capture_integration(sim)
+
+    def test_none_fields_diagnostic_once(self):
+        sim = self.optional_sim()
+        output = io.StringIO()
+        with patch.object(snapshot, "_reported_none_fields", set()), contextlib.redirect_stdout(output):
+            snapshot.capture_integration(sim)
+            snapshot.capture_integration(sim)
+        lines = output.getvalue().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(json.loads(lines[0].split("=", 1)[1]), ["mocap_pos", "mocap_quat", "userdata"])
+
+    def test_array_like_and_zero_dimensional_restore(self):
+        sim = self.optional_sim()
+        sim.data.ctrl, sim.data.qacc = [[1., 2.]], np.array(3.5)
+        saved = snapshot.capture_integration(sim)
+        sim.data.ctrl[0][0], sim.data.qacc[...] = 9., 10.
+        self.assertEqual(saved["ctrl"], [[1., 2.]])
+        snapshot.restore_integration(sim, saved)
+        self.assertEqual(sim.data.ctrl, [[1., 2.]])
+        np.testing.assert_array_equal(sim.data.qacc, np.array(3.5))
+
+    def test_none_training_digest_is_stable_and_distinguishes_array(self):
+        env = MockEnv()
+        env.sim = self.optional_sim()
+        env.sim.state.act = None
+        vector = {"workers": [{"envs": [snapshot.capture(env)]}],
+                  "ob_rms": {"proprioceptive": RunningMeanStd(shape=(1,))},
+                  "ret_rms": RunningMeanStd(), "ret": np.zeros(1)}
+        model = torch.nn.Linear(1, 1)
+        trainer = SimpleNamespace(actor_critic=model, optimizer=torch.optim.Adam(model.parameters()),
+                                  train_meter=SimpleNamespace(agent_meters={}))
+        observer = SimpleNamespace(out=self.out, updates=0)
+        (self.out / "sampling.json").write_text('[1]')
+        original_asarray = np.asarray
+        def numeric_array(value, *args, **kwargs):
+            self.assertIsNotNone(value, "None must not be hashed as an object-array memory address")
+            return original_asarray(value, *args, **kwargs)
+        with patch.object(runner, "vector_capture", return_value=vector), patch.object(np, "asarray", side_effect=numeric_array):
+            expected = runner.training_digest(trainer, observer)
+            self.assertEqual(runner.training_digest(trainer, observer), expected)
+            vector["workers"][0]["envs"][0]["integration"]["userdata"] = np.zeros(0)
+            self.assertNotEqual(runner.training_digest(trainer, observer), expected)
+
+    def test_benchmark_rerun_preserves_completed_all_failed_evidence(self):
+        out = self.out / "benchmark"
+        out.mkdir()
+        (out / "results.json").write_text('[]')
+        (out / "hardware.json").write_text('{"candidates": [1, 4, 8, 16, 32]}')
+        for workers in (1, 4, 8, 16, 32):
+            (out / f"workers_{workers}_failure.json").write_text('{"status": "FAIL"}')
+        (out / "original.log").write_text('original None.copy traceback')
+        with patch.object(runner.subprocess, "Popen", side_effect=RuntimeError("MOCK_STOP")), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, "MOCK_STOP"):
+                runner.benchmark(SimpleNamespace(output=str(out)), {"candidates": [16]})
+        archives = list(self.out.glob('benchmark_failed_*'))
+        self.assertEqual(len(archives), 1)
+        self.assertEqual((archives[0] / "original.log").read_text(), 'original None.copy traceback')
+        self.assertTrue(out.is_dir())
+
+    def test_benchmark_rerun_rejects_successful_or_partial_evidence(self):
+        out = self.out / "benchmark"
+        out.mkdir()
+        (out / "results.json").write_text('[{"status":"PASS"}]')
+        with self.assertRaisesRegex(FileExistsError, "successful evidence"):
+            runner.benchmark(SimpleNamespace(output=str(out)), {"candidates": [16]})
+        (out / "results.json").write_text('[]')
+        (out / "hardware.json").write_text('{"candidates": [16]}')
+        with self.assertRaisesRegex(FileExistsError, "not a completed all-failed attempt"):
+            runner.benchmark(SimpleNamespace(output=str(out)), {"candidates": [16]})
+        self.assertEqual(list(self.out.glob('benchmark_failed_*')), [])
 
     def test_original_actorcritic_and_rms_inference_load(self):
         from metamorph.algos.ppo.model import ActorCritic

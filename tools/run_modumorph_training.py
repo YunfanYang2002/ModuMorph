@@ -131,6 +131,10 @@ def training_digest(trainer, observer):
     import numpy as np
     digest = hashlib.sha256()
     def array(value):
+        if value is None:
+            digest.update(b"\x00")
+            return
+        digest.update(b"\x01")
         digest.update(np.asarray(value).tobytes())
     for name, tensor in sorted(trainer.actor_critic.state_dict().items()):
         digest.update(name.encode())
@@ -396,6 +400,17 @@ def train(args):
 
 def benchmark(args, hardware):
     out = output_path(args.output)
+    if out.exists():
+        if (out / "selected.json").exists() or json.loads((out / "results.json").read_text()) != []:
+            raise FileExistsError("existing benchmark contains successful evidence; use a new output directory")
+        previous = json.loads((out / "hardware.json").read_text())
+        for workers in set([16] + previous["candidates"]):
+            failure = out / f"workers_{workers}_failure.json"
+            if not failure.is_file() or json.loads(failure.read_text())["status"] != "FAIL":
+                raise FileExistsError("existing benchmark is not a completed all-failed attempt: " + str(failure))
+        archived = output_path(out.with_name(out.name + "_failed_" + str(time.time_ns())))
+        out.rename(archived)
+        print("FAILED_BENCHMARK_ARCHIVED=" + str(archived), flush=True)
     out.mkdir(parents=True, exist_ok=False)
     write_json(out / "hardware.json", hardware)
     trials = [16] + [n for n in hardware["candidates"] if n != 16]
