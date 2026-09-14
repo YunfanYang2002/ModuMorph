@@ -271,7 +271,8 @@ class TransformerModel(nn.Module):
             context_embedding_HN = self.context_encoder_HN(context_embedding_HN)
 
         if self.model_args.HYPERNET and self.model_args.HN_EMBED:
-            embed_weight = self.hnet_embed_weight(context_embedding_HN).reshape(self.seq_len, batch_size, limb_obs_size, self.d_model)
+            embed_weight = self.hnet_embed_weight(context_embedding_HN).reshape(self.seq_len, 
+                                                                batch_size, limb_obs_size, self.d_model)
             embed_bias = self.hnet_embed_bias(context_embedding_HN)
             obs_embed = (obs[:, :, :, None] * embed_weight).sum(dim=-2, keepdim=False) + embed_bias
         else:
