@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "scope": "Frozen Strict-OOD97 Table 2; static policy backend only",
+  "source_reference_sha": "3893388b79b0df4b10ad3cd8504258618947325c",
+  "source_sha256": {
+    "tools/evaluate_dynamics.py": "88fc1581ff077fe861ea463c6d634be552b4be63e9c76c64e77474ce595ac1ff",
+    "tools/evaluate_v1.py": "3071dd0d09071b017aed08b420d71e0173943e758c8be87a0db39254d257a0f1",
+    "tools/morphadapt_trace.py": "76c70c81a22e5e470d1340d7dc3c5fe7e1ff1950fef0c56f48c74fdb5bac0029",
+    "tools/morphadapt_previous_action_intervention.py": "ba7e0129538f18f02341898ae7f17df74df57841031f5d56c953c93fd676ea8a",
+    "tools/prepare_morphadapt_canonical_student_formal_table2.py": "f1d6c4238c5abd13393b2e30ae11b207b765eaa602d4a3937073c6e655846176",
+    "tools/reaggregate_morphadapt_strict_ood97.py": "1d012eefac797e42103ffa0b7130f0eecd62666f6418d4b083ba7eced7f6f022",
+    "metamorph/config.py": "537dade097918cead6f95190138e87faf841902ef4c1b4aabb34292b0802f847",
+    "metamorph/envs/__init__.py": "55057ea8db7f99af9ccfbfc8f289c40b921cea9202bd725bb26dc65577c40e28",
+    "metamorph/algos/ppo/envs.py": "1ebc0aa6eb42384fd95ae4c444140d384108660888c7da30ea860417e84cbd16",
+    "metamorph/envs/dynamics.py": "ff3155e879b7aa6e2e342ea51e10e39859f2eb8e23cb829118d4a97197184bf7",
+    "metamorph/envs/history_dynamics.py": "637027bec98cad06a8606400e899dc6e3ae64d437b12be6e2a3632f1d1c26691",
+    "metamorph/envs/modules/agent.py": "fee33eafe652420096b80b57a2df0f6ad6add483a99c4b5287a159aedd386ffd",
+    "metamorph/envs/modules/floor.py": "775ff2a39f7bf08216fe9f4a5a6adbd0a49255e702ea05bd34e90acd03b34dc6",
+    "metamorph/envs/tasks/unimal.py": "50664ee1162d66c41eba6309c5d34ff2ebdc6981287e6ad62af43e179fca3c9b",
+    "metamorph/envs/tasks/task.py": "4ba3efa1d4b2b5d5a044357359ab16ea207b1b607fe86a27f7a3e4465463a274",
+    "metamorph/envs/tasks/locomotion.py": "0d0684acf56d73b660800146ce9e3706b8820f0fbc2a68ed7e3531eaa311ff1a",
+    "metamorph/envs/wrappers/multi_env_wrapper.py": "20eea5d4412cf13cf5f7501d88dd139ac609a6fbdaad595ba9bebcf217662bd8",
+    "metamorph/envs/wrappers/hfield.py": "3eff6dc38b5fa749130b2cb9c9e74ce8efd77d0d13beac48e55e99b23d405f19",
+    "metamorph/envs/wrappers/select_keys.py": "39f2600afc65498c9867e8388c49d78bd95ae0a45c94eead7fd2e90ce08aeb8f",
+    "metamorph/envs/vec_env/vec_normalize.py": "85c729dc00dcbf896ccbd60dae0f4d9724967978aa0d7196790f23d16ffda14d",
+    "metamorph/envs/vec_env/pytorch_vec_env.py": "0757c28c71e2b69ec41346ec194f0dd3d54e61d9d7222a63e9495cf41b72180d",
+    "metamorph/envs/vec_env/dummy_vec_env.py": "0427600222ad8b35b1d559a102f4bc34a82344c1ce14278d001c0bf84ae4ea65",
+    "metamorph/envs/vec_env/utils.py": "4a76cf2848272770c8bd4e01c42be12f15ef20835422935fa901f79240da6864",
+    "metamorph/utils/sample.py": "b844f5d41129bcd64ff5cef301555ff0c7fb7e93daa8c3f38aa85eb5a07971a7",
+    "metamorph/utils/mjpy.py": "823471b4f112343a4ca93a8a24246c54f8d60ae59398f05de40a549fe27be832",
+    "metamorph/utils/xml.py": "e757e53d3d8f21f046a290cd4ff8d275462cef4b143932d281349ef6adb2f83d",
+    "metamorph/envs/assets/unimal.xml": "045ea60b10bd0d717c65e03a3c0d79f8ca67aadb42f5499a29e7029b388db124",
+    "configs/morphadapt_metamorph_dr_formal_ood98.txt": "3bb2219209b79e1c1e37dbbfd04327eb28db66bf12db97cdc1d4cadf46179c04"
+  },
+  "environment_config": "configs/morphadapt_metamorph_dr_matched_s1409_reference.yaml",
+  "environment_config_sha256": "b262a891bc5b7b20225da27af27839b2a39f2815461b6b6695166f18bd8ae622",
+  "evaluation_seeds": [
+    1409
+  ],
+  "evaluation_seed_authority": "tools/prepare_morphadapt_canonical_student_formal_table2.py rendered --seeds 1409; tools/run_morphadapt_p1_target_consistency_10m_formal_eval.py EVALUATION_SEED=1409",
+  "split_authority": "tools/reaggregate_morphadapt_strict_ood97.py frozen_ood97; current tmp/morphadapt_table2_paper_integration_staging/TABLE2_MANUSCRIPT_INTEGRATION_REPORT.md",
+  "formal_evaluation": {
+    "ood_walkers_file": "configs/modumorph_strict_ood97.txt",
+    "ood_walker_count": 97,
+    "ood_walkers_sha256": "d4355e883ed4125491d4920232d38739cc58ec3c1f1de66a7bfa7233d1c5a492",
+    "protocols": [
+      "nominal",
+      "id",
+      "ood_mild",
+      "ood_strong"
+    ],
+    "settings": [
+      "fixed_dynamics",
+      "mutation"
+    ],
+    "episodes_per_walker": 1,
+    "max_steps_per_walker": 1000,
+    "mutation_step": 250,
+    "recovery_baseline_window": 25,
+    "recovery_threshold_fraction": 0.8,
+    "recovery_min_baseline": 0.05,
+    "recovery_sustain_steps": 25,
+    "mid_episode_motor_strength_range": [
+      0.6,
+      1.4
+    ],
+    "mid_episode_friction_range": [
+      0.4,
+      1.6
+    ],
+    "mid_episode_mass_range": [
+      0.6,
+      1.4
+    ]
+  },
+  "overrides": {
+    "DYNAMICS.RECOVERY_BASELINE_WINDOW": 25,
+    "DYNAMICS.RECOVERY_THRESHOLD_FRACTION": 0.8,
+    "DYNAMICS.RECOVERY_MIN_BASELINE": 0.05,
+    "DYNAMICS.RECOVERY_SUSTAIN_STEPS": 25,
+    "DYNAMICS.MID_EPISODE_MOTOR_STRENGTH_RANGE": [
+      0.6,
+      1.4
+    ],
+    "DYNAMICS.MID_EPISODE_FRICTION_RANGE": [
+      0.4,
+      1.6
+    ],
+    "DYNAMICS.MID_EPISODE_MASS_RANGE": [
+      0.6,
+      1.4
+    ]
+  },
+  "adaptation_metrics": {
+    "event_denominator": "episodes_that_reached_the_perturbation_step",
+    "performance_metric": "x_vel",
+    "pnp": "mean(post_performance) / pre_perturbation_baseline",
+    "nar": "mean(max(0, baseline - post_performance)) / abs(baseline)",
+    "rmrt_unrecovered_value": "max_episode_steps - perturbation_step + 1",
+    "early_termination_note": "proxy safety outcome; termination reason is not yet classified as fall"
+  },
+  "sustained_recovery_metrics": {
+    "event_denominator": "episodes_that_reached_the_perturbation_step",
+    "time_convention": "1-based post-mutation confirmation step; onset is the first step of the qualifying consecutive window",
+    "missing_time_policy": "null is excluded from time summaries and is never coerced to zero",
+    "relapse_policy": "a later sustained relapse is reported separately and does not revoke an observed sustained recovery",
+    "raw_reconstruction": "post_mutation_condition_runs is a run-length encoding of met/not_met/missing recovery-condition states"
+  },
+  "source_hash_encoding": "SHA256 of text bytes with CRLF normalized to LF; real XML/checkpoint/evidence use raw bytes"
+}
