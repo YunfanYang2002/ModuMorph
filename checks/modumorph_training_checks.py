@@ -276,6 +276,62 @@ class TrainingChecks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "active render viewers"):
             snapshot.capture(env)
 
+    def test_mjb_restore_passes_exact_bytes_from_nonempty_file(self):
+        env = MockEnv()
+        mjb = b"\x00MOCK-MJB\xff\x80\x00"
+        with patch.object(env.sim.model, "get_mjb", return_value=mjb):
+            saved = snapshot.capture(env)
+        self.assertEqual(saved["mjb"], mjb)
+        scratch = self.out / "scratch"
+        arguments = []
+        def load(model_bytes):
+            self.assertIs(type(model_bytes), bytes)
+            self.assertEqual(model_bytes, mjb)
+            paths = list(scratch.glob("*.mjb"))
+            self.assertEqual(len(paths), 1)
+            self.assertTrue(paths[0].is_file())
+            self.assertGreater(paths[0].stat().st_size, 0)
+            self.assertEqual(paths[0].read_bytes(), mjb)
+            arguments.append(model_bytes)
+            return MockModel()
+        fake = ModuleType("mujoco_py")
+        fake.MjSim, fake.load_model_from_mjb = MockSim, load
+        with patch.dict(sys.modules, {"mujoco_py": fake}):
+            restored = snapshot.restore(saved, scratch)
+        self.assertEqual(arguments, [mjb])
+        np.testing.assert_array_equal(restored.sim.state.qpos, env.sim.state.qpos)
+        self.assertEqual(list(scratch.glob("*.mjb")), [])
+
+    def test_mjb_capture_rejects_empty_bytes(self):
+        env = MockEnv()
+        with patch.object(env.sim.model, "get_mjb", return_value=b""):
+            with self.assertRaisesRegex(ValueError, "non-empty bytes"):
+                snapshot.capture(env)
+
+    def test_mjb_restore_rejects_missing_and_empty_file_before_loader(self):
+        saved = snapshot.capture(MockEnv())
+        original = tempfile.NamedTemporaryFile
+        for missing in (True, False):
+            with self.subTest(missing=missing):
+                @contextlib.contextmanager
+                def altered_file(**kwargs):
+                    with original(**kwargs) as stream:
+                        yield stream
+                    path = Path(stream.name)
+                    if missing:
+                        path.unlink()
+                    else:
+                        path.write_bytes(b"")
+                fake = ModuleType("mujoco_py")
+                fake.MjSim = MockSim
+                fake.load_model_from_mjb = unittest.mock.Mock()
+                with patch.dict(sys.modules, {"mujoco_py": fake}), patch.object(snapshot.tempfile, "NamedTemporaryFile", altered_file):
+                    expected = FileNotFoundError if missing else ValueError
+                    with self.assertRaises(expected):
+                        snapshot.restore(saved, self.out / "scratch")
+                fake.load_model_from_mjb.assert_not_called()
+                self.assertEqual(list((self.out / "scratch").glob("*.mjb")), [])
+
     def optional_sim(self):
         sim = MockSim()
         for key in ("mocap_pos", "mocap_quat", "userdata"):

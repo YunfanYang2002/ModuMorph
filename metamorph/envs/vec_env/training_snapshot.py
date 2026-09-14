@@ -90,7 +90,10 @@ def capture(env):
         child = fields.pop(link)
         layers.append((type(current), fields, link))
         current = child
-    return {"layers": cloudpickle.dumps(layers), "mjb": sim.model.get_mjb(),
+    mjb = sim.model.get_mjb()
+    if not isinstance(mjb, bytes) or not mjb:
+        raise ValueError("snapshot model MJB must be non-empty bytes")
+    return {"layers": cloudpickle.dumps(layers), "mjb": mjb,
             "sim_state": sim.get_state(),
             "integration": capture_integration(sim)}
 
@@ -104,9 +107,13 @@ def restore(snapshot, scratch):
         stream.write(snapshot["mjb"])
         model_path = Path(stream.name)
     try:
-        sim = mujoco_py.MjSim(mujoco_py.load_model_from_mjb(str(model_path)))
+        model_bytes = model_path.read_bytes()
+        if not model_bytes:
+            raise ValueError("snapshot MJB file is empty: " + str(model_path))
+        sim = mujoco_py.MjSim(mujoco_py.load_model_from_mjb(model_bytes))
     finally:
-        model_path.unlink()
+        if model_path.exists():
+            model_path.unlink()
     sim.set_state(snapshot["sim_state"])
     sim.forward()
     restore_integration(sim, snapshot["integration"])
