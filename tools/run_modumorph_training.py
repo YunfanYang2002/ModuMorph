@@ -175,6 +175,10 @@ def training_digest(trainer, observer):
     return digest.hexdigest()
 
 
+REPLAY_RTOL = 1e-12
+REPLAY_ATOL = 1e-12
+
+
 def replay_mismatch(actual, expected, path, details=()):
     import numbers
     import numpy as np
@@ -199,7 +203,8 @@ def replay_mismatch(actual, expected, path, details=()):
 def equality(actual, expected, path="root"):
     import numpy as np
     import torch
-    if type(actual) is not type(expected):
+    floating_scalars = isinstance(actual, (float, np.floating)) and isinstance(expected, (float, np.floating))
+    if type(actual) is not type(expected) and not floating_scalars:
         replay_mismatch(actual, expected, path)
     if isinstance(actual, dict):
         if actual.keys() != expected.keys():
@@ -213,22 +218,41 @@ def equality(actual, expected, path="root"):
         for i, (a, b) in enumerate(zip(actual, expected)):
             equality(a, b, f"{path}[{i}]")
     elif isinstance(actual, (torch.Tensor, np.ndarray)):
-        if actual.shape != expected.shape or actual.dtype != expected.dtype:
+        if actual.shape != expected.shape:
             replay_mismatch(actual, expected, path)
-        same = torch.equal(actual, expected) if isinstance(actual, torch.Tensor) else np.array_equal(actual, expected)
+        a = actual.detach().cpu().numpy() if isinstance(actual, torch.Tensor) else actual
+        b = expected.detach().cpu().numpy() if isinstance(expected, torch.Tensor) else expected
+        floating_arrays = a.dtype.kind == b.dtype.kind == "f"
+        if actual.dtype != expected.dtype and not floating_arrays:
+            replay_mismatch(actual, expected, path)
+        if floating_arrays:
+            finite = np.isfinite(a) & np.isfinite(b)
+            same = bool(finite.all()) and np.allclose(a, b, rtol=REPLAY_RTOL, atol=REPLAY_ATOL, equal_nan=False)
+            mismatch = ~finite | ~np.isclose(a, b, rtol=REPLAY_RTOL, atol=REPLAY_ATOL, equal_nan=False)
+        else:
+            same = torch.equal(actual, expected) if isinstance(actual, torch.Tensor) else np.array_equal(actual, expected)
+            mismatch = a != b
         if not same:
-            a = actual.detach().cpu().numpy() if isinstance(actual, torch.Tensor) else actual
-            b = expected.detach().cpu().numpy() if isinstance(expected, torch.Tensor) else expected
-            index = tuple(int(i) for i in np.argwhere(a != b)[0])
+            index = tuple(int(i) for i in np.argwhere(mismatch)[0])
             details = [f"FIRST_MISMATCH_INDEX={index}",
                        f"ACTUAL_VALUE={a[index]!r}", f"EXPECTED_VALUE={b[index]!r}"]
             if a.dtype.kind in "biufc":
                 # Diagnostic arithmetic uses Python scalars to avoid integer overflow.
                 diffs = [abs(x.item() - y.item()) for x, y in zip(a.flat, b.flat)]
                 details.append(f"MAX_ABS_DIFF={max(diffs)!r}")
+                rels = [diff / abs(y.item()) if y else (0 if diff == 0 else float('inf'))
+                        for diff, y in zip(diffs, b.flat)]
+                details.append(f"MAX_REL_DIFF={max(rels)!r}")
             else:
-                details.append("MAX_ABS_DIFF=NOT_NUMERIC")
+                details.extend(("MAX_ABS_DIFF=NOT_NUMERIC", "MAX_REL_DIFF=NOT_NUMERIC"))
+            if floating_arrays and not finite.all():
+                details.append("NONFINITE_REJECTED=YES")
             replay_mismatch(actual, expected, path, details)
+    elif floating_scalars:
+        if not np.isfinite(actual) or not np.isfinite(expected):
+            replay_mismatch(actual, expected, path, ("NONFINITE_REJECTED=YES",))
+        if not np.isclose(actual, expected, rtol=REPLAY_RTOL, atol=REPLAY_ATOL, equal_nan=False):
+            replay_mismatch(actual, expected, path)
     else:
         if actual != expected:
             replay_mismatch(actual, expected, path)

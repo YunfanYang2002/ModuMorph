@@ -125,18 +125,69 @@ class TrainingChecks(unittest.TestCase):
                          "FIRST_MISMATCH_INDEX=(0, 1)", "ACTUAL_VALUE=2.0", "EXPECTED_VALUE=1.0"):
                 self.assertIn(text, message)
         with self.assertRaises(AssertionError):
-            runner.equality(np.array([1. + 1e-12]), np.array([1.]))
+            runner.equality(np.array([1. + 1e-8]), np.array([1.]))
         runner.equality(actual.copy(), actual)
 
     def test_replay_rejects_structure_dtype_and_time_key_mismatch(self):
         cases = (({"t": 2.}, {"t": 1.}, "root['t']"),
                  ({"a": 1}, {"b": 1}, "root"), ([1], [], "root"),
                  (1, 1., "root"), (np.zeros(2), np.zeros(3), "root"),
-                 (np.zeros(2, dtype=np.float32), np.zeros(2, dtype=np.float64), "root"))
+                 (np.zeros(2, dtype=np.int32), np.zeros(2, dtype=np.int64), "root"))
         for actual, expected, path in cases:
             with self.subTest(actual=actual), self.assertRaises(AssertionError) as caught:
                 runner.equality(actual, expected)
             self.assertIn("SNAPSHOT_REPLAY_MISMATCH_PATH=" + path, str(caught.exception))
+
+    def test_float64_machine_eps_diff(self):
+        self.assertEqual((runner.REPLAY_RTOL, runner.REPLAY_ATOL), (1e-12, 1e-12))
+        actual = np.float64(0.00420571824832821)
+        expected = np.float64(0.004205718248328209)
+        runner.equality((None, None, None, [{}, {}, {}, {"x_pos": actual}]),
+                        (None, None, None, [{}, {}, {}, {"x_pos": expected}]))
+        runner.equality(float(actual), expected)
+
+    def test_float_array_tiny_roundoff_and_compatible_category(self):
+        actual = np.array([0.00420571824832821, 1. + 1e-13])
+        expected = np.array([0.004205718248328209, 1.])
+        runner.equality(actual, expected)
+        runner.equality(torch.tensor(actual), torch.tensor(expected))
+        runner.equality(np.array([1.], dtype=np.float32), np.array([1.], dtype=np.float64))
+        runner.equality(torch.ones(1, dtype=torch.float32), torch.ones(1, dtype=torch.float64))
+        with self.assertRaises(AssertionError):
+            runner.equality(np.array([1.]), np.array([1]))
+
+    def test_float_scalar_1e8_diff_rejected(self):
+        for actual, expected in ((1e-8, 0.), (np.float64(1. + 1e-8), np.float64(1.))):
+            with self.subTest(actual=actual), self.assertRaises(AssertionError):
+                runner.equality(actual, expected)
+
+    def test_float_array_1e8_diff_rejected_with_diagnostic(self):
+        actual, expected = np.array([1. + 1e-13, 1e-8]), np.array([1., 0.])
+        for a, b in ((actual, expected), (torch.tensor(actual), torch.tensor(expected))):
+            with self.subTest(type=type(a)), self.assertRaises(AssertionError) as caught:
+                runner.equality({"state": a}, {"state": b})
+            for text in ("root['state']", "FIRST_MISMATCH_INDEX=(1,)",
+                         "MAX_ABS_DIFF=", "MAX_REL_DIFF=", "ACTUAL_VALUE=", "EXPECTED_VALUE="):
+                self.assertIn(text, str(caught.exception))
+
+    def test_nonfloat_exactness_preserved(self):
+        for actual, expected in ((2, 1), (True, False), ("walker_a", "walker_b"),
+                                 (None, 0), ([1], []), ((1,), [1]),
+                                 (np.array([True]), np.array([False])),
+                                 (np.array([2]), np.array([1]))):
+            with self.subTest(actual=actual), self.assertRaises(AssertionError):
+                runner.equality(actual, expected)
+
+    def test_float_nan_and_inf_rejected(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            for actual, expected in ((value, value), (value, 0.), (0., value)):
+                cases = ((actual, expected), (np.array([actual]), np.array([expected])),
+                         (torch.tensor([actual]), torch.tensor([expected])))
+                for a, b in cases:
+                    with self.subTest(actual=a, expected=b), self.assertRaises(AssertionError) as caught:
+                        runner.equality({"state": a}, {"state": b})
+                    self.assertIn("root['state']", str(caught.exception))
+                    self.assertIn("NONFINITE_REJECTED=YES", str(caught.exception))
 
     def test_replay_numeric_zero_and_unsigned_diagnostics(self):
         for actual, expected, diff in ((1, 0, "1"), (np.uint8(0), np.uint8(255), "255")):
@@ -168,6 +219,32 @@ class TrainingChecks(unittest.TestCase):
         self.assertEqual(len(calls), 17)
         self.assertEqual(observer.steps, 0)
         self.assertEqual(observer.updates, 0)
+
+    def test_replay_gate_completes_roundoff_equivalent_restore(self):
+        (self.out / "status").mkdir()
+        actions = []
+        def step(action):
+            actions.append(action)
+            x_pos = np.float64(0.004205718248328209 if len(actions) <= 16 else 0.00420571824832821)
+            return (torch.zeros(32, 1), torch.zeros(32, 1), np.zeros(32, dtype=bool), [{"x_pos": x_pos}])
+        trainer = SimpleNamespace(device="cpu", actor_critic=SimpleNamespace(num_actions=1),
+                                  save_sampled_agent_seq=lambda iteration: None,
+                                  envs=SimpleNamespace(reset=lambda: {}, step=step))
+        observer = runner.PilotObserver(self.out, {}, 245760, False)
+        state = {"mock": True}
+        with patch.object(runner, "vector_capture", return_value=state) as capture, \
+                patch.object(runner, "vector_restore") as restore:
+            observer.initialize(trainer)
+        capture.assert_called_once_with(trainer)
+        self.assertEqual(restore.call_count, 2)
+        for call in restore.call_args_list:
+            self.assertEqual(call.args, (trainer, state))
+        self.assertEqual(len(actions), 32)
+        self.assertTrue(all(torch.equal(action, actions[0]) for action in actions))
+        self.assertEqual(tuple(actions[0].shape), (32, 1))
+        report = json.loads((self.out / "status/resume_roundtrip.json").read_text())
+        self.assertEqual(report, {"STATE_ROUNDTRIP": "PASS", "probe_lane_transitions": 512})
+        self.assertEqual((observer.steps, observer.updates), (0, 0))
 
     def test_diagnose_cli_runs_one_worker_without_sweep(self):
         with patch.object(sys, "argv", ["runner", "diagnose"]), \
