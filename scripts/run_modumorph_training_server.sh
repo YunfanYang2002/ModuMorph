@@ -3,7 +3,7 @@ set -Eeuo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd -- "$root"
 if (( $# < 2 )); then
-  echo 'Usage: bash scripts/run_modumorph_training_server.sh GPU preflight|benchmark|pilot [--resume] [--no-keep-open]' >&2
+  echo 'Usage: bash scripts/run_modumorph_training_server.sh GPU preflight|diagnose|benchmark|pilot [--resume] [--no-keep-open]' >&2
   exit 2
 fi
 gpu="$1"
@@ -21,6 +21,14 @@ export CUDA_VISIBLE_DEVICES="$gpu" PYTHONUNBUFFERED=1
 export PYTHONDONTWRITEBYTECODE=1
 launch="./tmp/modumorph_training_launch_$(date -u +%Y%m%dT%H%M%SZ)_$$"
 mkdir -- "$launch"
+if [[ "$mode" == diagnose ]]; then
+  # Keep the default diagnostic report in the launch evidence package.
+  has_output=0
+  for argument in "${arguments[@]}"; do
+    if [[ "$argument" == --output || "$argument" == --output=* ]]; then has_output=1; fi
+  done
+  if (( ! has_output )); then arguments+=(--output "$launch/snapshot_replay"); fi
+fi
 finish() {
   rc=$?
   trap - EXIT

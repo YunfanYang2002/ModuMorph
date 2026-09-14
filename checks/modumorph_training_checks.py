@@ -102,6 +102,112 @@ class TrainingChecks(unittest.TestCase):
         cfg.update(self.original)
         self.temporary.cleanup()
 
+    def test_replay_nested_scalar_diagnostic(self):
+        actual = (None, None, None, [{"foo": 2}])
+        expected = (None, None, None, [{"foo": 1}])
+        with self.assertRaises(AssertionError) as caught:
+            runner.equality(actual, expected)
+        message = str(caught.exception)
+        for text in ("SNAPSHOT_REPLAY_MISMATCH_PATH=root[3][0]['foo']",
+                     "ACTUAL_TYPE=builtins.int", "EXPECTED_TYPE=builtins.int",
+                     "ACTUAL_REPR=2", "EXPECTED_REPR=1", "ABS_DIFF=1", "REL_DIFF=1.0"):
+            self.assertIn(text, message)
+
+    def test_replay_array_diagnostic_and_exactness(self):
+        actual = np.array([[1., 2.], [3., 4.]])
+        expected = np.array([[1., 1.], [3., 2.]])
+        for a, b in ((actual, expected), (torch.tensor(actual), torch.tensor(expected))):
+            with self.subTest(type=type(a)), self.assertRaises(AssertionError) as caught:
+                runner.equality({"obs": a}, {"obs": b})
+            message = str(caught.exception)
+            for text in ("root['obs']", "ACTUAL_SHAPE=(2, 2)", "EXPECTED_SHAPE=(2, 2)",
+                         "ACTUAL_DTYPE=", "EXPECTED_DTYPE=", "MAX_ABS_DIFF=2.0",
+                         "FIRST_MISMATCH_INDEX=(0, 1)", "ACTUAL_VALUE=2.0", "EXPECTED_VALUE=1.0"):
+                self.assertIn(text, message)
+        with self.assertRaises(AssertionError):
+            runner.equality(np.array([1. + 1e-12]), np.array([1.]))
+        runner.equality(actual.copy(), actual)
+
+    def test_replay_rejects_structure_dtype_and_time_key_mismatch(self):
+        cases = (({"t": 2.}, {"t": 1.}, "root['t']"),
+                 ({"a": 1}, {"b": 1}, "root"), ([1], [], "root"),
+                 (1, 1., "root"), (np.zeros(2), np.zeros(3), "root"),
+                 (np.zeros(2, dtype=np.float32), np.zeros(2, dtype=np.float64), "root"))
+        for actual, expected, path in cases:
+            with self.subTest(actual=actual), self.assertRaises(AssertionError) as caught:
+                runner.equality(actual, expected)
+            self.assertIn("SNAPSHOT_REPLAY_MISMATCH_PATH=" + path, str(caught.exception))
+
+    def test_replay_numeric_zero_and_unsigned_diagnostics(self):
+        for actual, expected, diff in ((1, 0, "1"), (np.uint8(0), np.uint8(255), "255")):
+            with self.assertRaises(AssertionError) as caught:
+                runner.equality(actual, expected)
+            self.assertIn("ABS_DIFF=" + diff, str(caught.exception))
+        with self.assertRaises(AssertionError) as caught:
+            runner.equality(np.array(2), np.array(1))
+        self.assertIn("FIRST_MISMATCH_INDEX=()", str(caught.exception))
+
+    def test_replay_gate_persists_first_mismatch_and_reraises(self):
+        (self.out / "status").mkdir()
+        calls = []
+        def step(action):
+            calls.append(action)
+            return (None, None, None, [{"foo": 1 if len(calls) <= 16 else 2}])
+        trainer = SimpleNamespace(device="cpu", actor_critic=SimpleNamespace(num_actions=1),
+                                  save_sampled_agent_seq=lambda iteration: None,
+                                  envs=SimpleNamespace(reset=lambda: {}, step=step))
+        observer = runner.PilotObserver(self.out, {}, 245760, False)
+        with patch.object(runner, "vector_capture", return_value={}), patch.object(runner, "vector_restore"), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(AssertionError):
+                observer.initialize(trainer)
+        report = json.loads((self.out / "status/replay_mismatch.json").read_text())
+        self.assertEqual(report["SNAPSHOT_REPLAY_STEP"], 1)
+        self.assertIn("root[3][0]['foo']", report["diagnostic"])
+        self.assertIn("ACTUAL_REPR=2", output.getvalue())
+        self.assertEqual(len(calls), 17)
+        self.assertEqual(observer.steps, 0)
+        self.assertEqual(observer.updates, 0)
+
+    def test_diagnose_cli_runs_one_worker_without_sweep(self):
+        with patch.object(sys, "argv", ["runner", "diagnose"]), \
+                patch.object(runner, "preflight", return_value={}), \
+                patch.object(runner, "train") as train, patch.object(runner, "benchmark") as benchmark:
+            runner.main()
+        args = train.call_args.args[0]
+        self.assertEqual((args.workers, args.num_envs, args.budget, args.resume), (1, 32, 245760, False))
+        benchmark.assert_not_called()
+
+    def test_diagnose_branch_only_initializes_and_closes(self):
+        # Execute the actual diagnostic branch without Linux/CUDA/MuJoCo setup.
+        node = function_ast((ROOT / "tools/run_modumorph_training.py").read_text(), "train")
+        node.body = [next(n for n in node.body if isinstance(n, ast.If)
+                          and ast.unparse(n.test) == "args.mode == 'diagnose'")]
+        events = []
+        trainer = SimpleNamespace(writer=SimpleNamespace(close=lambda: events.append("writer_close")),
+                                  envs=SimpleNamespace(close=lambda: events.append("envs_close")),
+                                  train=lambda *args: self.fail("diagnostic invoked PPO training"))
+        (self.out / "status").mkdir()
+        for fails in (False, True):
+            events.clear()
+            def initialize(trainer):
+                events.append("initialize")
+                if fails:
+                    raise AssertionError("deliberate replay failure")
+            namespace = {"args": SimpleNamespace(mode="diagnose", workers=1), "trainer": trainer,
+                         "observer": SimpleNamespace(initialize=initialize, steps=0, updates=0),
+                         "out": self.out, "write_json": runner.write_json}
+            function = execute_function(node, namespace)
+            with contextlib.redirect_stdout(io.StringIO()):
+                if fails:
+                    with self.assertRaisesRegex(AssertionError, "deliberate replay failure"):
+                        function(namespace["args"])
+                else:
+                    function(namespace["args"])
+            self.assertEqual(events, ["initialize", "writer_close", "envs_close"])
+        report = json.loads((self.out / "status/diagnostic.json").read_text())
+        self.assertEqual((report["training_env_steps"], report["optimizer_updates"]), (0, 0))
+
     def test_env_step_accounting_10m_prefix(self):
         result = contract.accounting(10_000_000)
         self.assertEqual(result["training_iterations"], 122)

@@ -175,24 +175,63 @@ def training_digest(trainer, observer):
     return digest.hexdigest()
 
 
-def equality(actual, expected):
+def replay_mismatch(actual, expected, path, details=()):
+    import numbers
     import numpy as np
     import torch
+    lines = [f"SNAPSHOT_REPLAY_MISMATCH_PATH={path}",
+             f"ACTUAL_TYPE={type(actual).__module__}.{type(actual).__qualname__}",
+             f"EXPECTED_TYPE={type(expected).__module__}.{type(expected).__qualname__}"]
+    for label, value in (("ACTUAL", actual), ("EXPECTED", expected)):
+        if isinstance(value, (np.ndarray, torch.Tensor)):
+            lines.extend((f"{label}_SHAPE={tuple(value.shape)}", f"{label}_DTYPE={value.dtype}"))
+        else:
+            lines.append(f"{label}_REPR={value!r}")
+    if isinstance(actual, numbers.Number) and isinstance(expected, numbers.Number):
+        a = actual.item() if isinstance(actual, np.generic) else actual
+        b = expected.item() if isinstance(expected, np.generic) else expected
+        diff = abs(a - b)
+        lines.extend((f"ABS_DIFF={diff!r}", f"REL_DIFF={diff / abs(b) if b else (0 if diff == 0 else float('inf'))!r}"))
+    lines.extend(details)
+    raise AssertionError("snapshot replay mismatch\n" + "\n".join(lines))
+
+
+def equality(actual, expected, path="root"):
+    import numpy as np
+    import torch
+    if type(actual) is not type(expected):
+        replay_mismatch(actual, expected, path)
     if isinstance(actual, dict):
-        assert actual.keys() == expected.keys()
+        if actual.keys() != expected.keys():
+            replay_mismatch(actual, expected, path,
+                            (f"ACTUAL_KEYS={list(actual)!r}", f"EXPECTED_KEYS={list(expected)!r}"))
         for key in actual:
-            if key != "t":  # wall-clock episode time is not trajectory state
-                equality(actual[key], expected[key])
+            equality(actual[key], expected[key], f"{path}[{key!r}]")
     elif isinstance(actual, (list, tuple)):
-        assert len(actual) == len(expected)
-        for a, b in zip(actual, expected):
-            equality(a, b)
-    elif isinstance(actual, torch.Tensor):
-        assert torch.equal(actual, expected), "snapshot replay tensor mismatch"
-    elif isinstance(actual, np.ndarray):
-        np.testing.assert_array_equal(actual, expected)
+        if len(actual) != len(expected):
+            replay_mismatch(actual, expected, path)
+        for i, (a, b) in enumerate(zip(actual, expected)):
+            equality(a, b, f"{path}[{i}]")
+    elif isinstance(actual, (torch.Tensor, np.ndarray)):
+        if actual.shape != expected.shape or actual.dtype != expected.dtype:
+            replay_mismatch(actual, expected, path)
+        same = torch.equal(actual, expected) if isinstance(actual, torch.Tensor) else np.array_equal(actual, expected)
+        if not same:
+            a = actual.detach().cpu().numpy() if isinstance(actual, torch.Tensor) else actual
+            b = expected.detach().cpu().numpy() if isinstance(expected, torch.Tensor) else expected
+            index = tuple(int(i) for i in np.argwhere(a != b)[0])
+            details = [f"FIRST_MISMATCH_INDEX={index}",
+                       f"ACTUAL_VALUE={a[index]!r}", f"EXPECTED_VALUE={b[index]!r}"]
+            if a.dtype.kind in "biufc":
+                # Diagnostic arithmetic uses Python scalars to avoid integer overflow.
+                diffs = [abs(x.item() - y.item()) for x, y in zip(a.flat, b.flat)]
+                details.append(f"MAX_ABS_DIFF={max(diffs)!r}")
+            else:
+                details.append("MAX_ABS_DIFF=NOT_NUMERIC")
+            replay_mismatch(actual, expected, path, details)
     else:
-        assert actual == expected, "snapshot replay scalar mismatch"
+        if actual != expected:
+            replay_mismatch(actual, expected, path)
 
 
 class PilotObserver:
@@ -240,8 +279,14 @@ class PilotObserver:
         action = torch.zeros((32, trainer.actor_critic.num_actions), device=trainer.device)
         expected = [trainer.envs.step(action) for _ in range(16)]
         vector_restore(trainer, state)
-        for result in expected:
-            equality(trainer.envs.step(action), result)
+        for step, result in enumerate(expected, 1):
+            try:
+                equality(trainer.envs.step(action), result)
+            except AssertionError as error:
+                write_json(self.out / "status/replay_mismatch.json",
+                           {"SNAPSHOT_REPLAY_STEP": step, "diagnostic": str(error)})
+                print(f"SNAPSHOT_REPLAY_STEP={step}\n{error}", flush=True)
+                raise
         vector_restore(trainer, state)
         write_json(self.out / "status/resume_roundtrip.json", {"STATE_ROUNDTRIP": "PASS", "probe_lane_transitions": 512})
         self.started = time.monotonic()
@@ -370,6 +415,18 @@ def train(args):
     torch.set_num_threads(1)  # existing native learner setting
     observer = PilotObserver(out, signature, args.budget, args.resume)
     trainer = PPO()
+    if args.mode == "diagnose":
+        try:
+            observer.initialize(trainer)
+            assert observer.steps == observer.updates == 0
+            write_json(out / "status/diagnostic.json",
+                       {"STATE_ROUNDTRIP": "PASS", "CPU_WORKERS": args.workers,
+                        "NUM_ENVS": 32, "seed": 1409, "training_env_steps": 0, "optimizer_updates": 0})
+            print("SNAPSHOT_REPLAY=PASS CPU_WORKERS=1 NUM_ENVS=32 OPTIMIZER_UPDATES=0", flush=True)
+        finally:
+            trainer.writer.close()
+            trainer.envs.close()
+        return
     resources = Resources(out)
     resources.future = resources.executor.submit(resources.collect)
     try:
@@ -459,7 +516,7 @@ def benchmark(args, hardware):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("preflight", "benchmark", "pilot", "internal"))
+    parser.add_argument("mode", choices=("preflight", "diagnose", "benchmark", "pilot", "internal"))
     parser.add_argument("--output")
     parser.add_argument("--budget", type=int, default=10_000_000)
     parser.add_argument("--workers", type=int, default=16)
@@ -471,7 +528,14 @@ def main():
     hardware = preflight()
     if args.mode == "preflight":
         return
-    if args.mode == "benchmark":
+    if args.mode == "diagnose":
+        if args.resume:
+            raise ValueError("diagnose mode requires a fresh snapshot replay gate")
+        args.workers = 1
+        args.budget = 245760
+        args.output = args.output or "./tmp/modumorph_snapshot_replay_s1409_" + str(time.time_ns())
+        train(args)
+    elif args.mode == "benchmark":
         args.output = args.output or "./tmp/modumorph_throughput_s1409"
         benchmark(args, hardware)
     elif args.mode == "pilot":
