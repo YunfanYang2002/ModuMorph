@@ -67,9 +67,14 @@ class PPO:
 
         self.fps = 0
 
-    def train(self):
-        self.save_sampled_agent_seq(0)
-        obs = self.envs.reset()
+    def train(self, observer=None):
+        self.training_observer = observer
+        if observer is None:
+            self.save_sampled_agent_seq(0)
+            obs = self.envs.reset()
+            start_iter = 0
+        else:
+            obs, start_iter = observer.initialize(self)
         self.buffer.to(self.device)
         self.start = time.time()
 
@@ -84,7 +89,7 @@ class PPO:
         else:
             self.stat_save_freq = 10
 
-        for cur_iter in range(cfg.PPO.MAX_ITERS):
+        for cur_iter in range(start_iter, cfg.PPO.MAX_ITERS):
 
             if cfg.PPO.EARLY_EXIT and cur_iter >= cfg.PPO.EARLY_EXIT_MAX_ITERS:
                 break
@@ -102,6 +107,8 @@ class PPO:
                 val, act, logp, dropout_mask_v, dropout_mask_mu = self.agent.act(obs, unimal_ids=unimal_ids)
 
                 next_obs, reward, done, infos = self.envs.step(act)
+                if observer is not None:
+                    observer.on_step(next_obs, reward, infos)
 
                 self.train_meter.add_ep_info(infos)
 
@@ -129,6 +136,8 @@ class PPO:
             self.save_sampled_agent_seq(cur_iter)
 
             self.train_meter.update_mean()
+            if observer is not None:
+                observer.after_iteration(self, cur_iter, obs)
             if len(self.train_meter.mean_ep_rews["reward"]):
                 cur_rew = self.train_meter.mean_ep_rews["reward"][-1]
                 self.writer.add_scalar(
@@ -149,7 +158,7 @@ class PPO:
                 fu.save_json(stats, path)
                 print (cfg.OUT_DIR)
             
-            if cur_iter % 100 == 0:
+            if observer is None and cur_iter % 100 == 0:
                 self.save_model(cur_iter)
 
         print("Finished Training: {}".format(self.file_prefix))
@@ -170,6 +179,8 @@ class PPO:
                 clip_ratio = cfg.PPO.CLIP_EPS
                 ratio = torch.exp(logp - batch["logp_old"])
                 approx_kl = (batch["logp_old"] - logp).mean().item()
+                if getattr(self, "training_observer", None) is not None:
+                    self.training_observer.on_batch(val, logp, ent, approx_kl)
 
                 if cfg.PPO.KL_TARGET_COEF is not None and approx_kl > cfg.PPO.KL_TARGET_COEF * 0.01:
                     self.train_meter.add_train_stat("approx_kl", approx_kl)
@@ -222,6 +233,8 @@ class PPO:
                 self.train_meter.add_train_stat("clip_frac", clip_frac)
 
                 self.optimizer.step()
+                if getattr(self, "training_observer", None) is not None:
+                    self.training_observer.after_optimizer_step(self)
 
         # Save weight histogram
         if cfg.SAVE_HIST_WEIGHTS:
@@ -245,9 +258,11 @@ class PPO:
         self.train_meter.log_stats()
 
     def _log_fps(self, cur_iter, log=True):
-        env_steps = self.env_steps_done(cur_iter)
+        observer = getattr(self, "training_observer", None)
+        env_steps = self.env_steps_done(cur_iter) if observer is None else observer.steps
         end = time.time()
-        self.fps = int(env_steps / (end - self.start))
+        elapsed = end - self.start if observer is None else observer.elapsed_before + time.monotonic() - observer.started
+        self.fps = int(env_steps / elapsed)
         if log:
             print(
                 "Updates {}, num timesteps {}, FPS {}".format(

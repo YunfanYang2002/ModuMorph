@@ -42,6 +42,15 @@ def worker(remote, parent_remote, env_fn_wrappers):
                 )
             elif cmd == 'get_unimal_idx':
                 remote.send([env.get_unimal_idx() for env in envs])
+            elif cmd == "capture_training_state":
+                from .training_snapshot import capture_worker
+                remote.send(CloudpickleWrapper(capture_worker(envs)))
+            elif cmd == "restore_training_state":
+                from .training_snapshot import restore_worker
+                for env in envs:
+                    env.close()
+                envs = restore_worker(data[0].x, data[1])
+                remote.send(True)
             else:
                 raise NotImplementedError
     except KeyboardInterrupt:
@@ -154,6 +163,18 @@ class SubprocVecEnv(VecEnv):
             remote.send(("get_unimal_idx", None))
         ids = [remote.recv() for remote in self.remotes]
         return _flatten_list(ids)
+
+    def capture_training_state(self):
+        assert not self.waiting, "snapshot requires a synchronous rollout boundary"
+        for remote in self.remotes:
+            remote.send(("capture_training_state", None))
+        return [remote.recv().x for remote in self.remotes]
+
+    def restore_training_state(self, states, scratch):
+        assert not self.waiting and len(states) == self.nremotes
+        for remote, state in zip(self.remotes, states):
+            remote.send(("restore_training_state", (CloudpickleWrapper(state), str(scratch))))
+        assert all(remote.recv() is True for remote in self.remotes)
 
 
 def _flatten_obs(obs):

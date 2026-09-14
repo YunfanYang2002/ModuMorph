@@ -1,0 +1,40 @@
+{
+  "MODUMORPH_TRAINING_AUDIT": "PASS",
+  "LEGACY_TRAINING_PATH_IDENTIFIED": "YES",
+  "PARALLELISM_IMPLEMENTED": "YES",
+  "PARALLELISM_SEMANTIC_SAFE": "YES",
+  "ENV_STEP_ACCOUNTING": "PASS",
+  "MORPHOLOGY_SPLIT_BINDING": "PASS",
+  "CHECKPOINT_SAVE_LOAD": "PASS",
+  "RMS_SAVE_LOAD": "PASS",
+  "RESUME_SAFETY": "PASS",
+  "NO_DR_CONFIRMED": "YES",
+  "REDUCED_BUDGET_PILOT": "YES",
+  "LOCAL_TESTS": "PASS",
+  "LOCAL_TRAINING_TEST_COUNT": 17,
+  "SERVER_THROUGHPUT_BENCHMARK_REQUIRED": "YES",
+  "SERVER_10M_PILOT_READY": "NO",
+  "FORMAL_MATCHED_BASELINE": "NO",
+  "SERVER_RUNTIME_VALIDATION": "NOT_RUN",
+  "GPU_VALIDATION": "NOT_RUN",
+  "FULL_EXPERIMENT": "NOT_RUN",
+  "REAL_TRAIN_ASSET_VALIDATION": "NOT_RUN",
+  "REAL_RESUME_ROUNDTRIP": "NOT_RUN",
+  "LEARNED_CHECKPOINT": "NOT_AVAILABLE",
+  "FROZEN_EVALUATOR_JOINT_REGRESSION": "FAIL_EXTERNAL_SOURCE_DRIFT",
+  "external_frozen_source_drift": [
+    {
+      "path": "tools/evaluate_dynamics.py",
+      "expected_sha256": "88fc1581ff077fe861ea463c6d634be552b4be63e9c76c64e77474ce595ac1ff",
+      "actual_sha256": "2ffba57b9e4e4aef0be6a7ad8abdb2dbb4d708cd06bee542084fb19921c9fa87"
+    },
+    {
+      "path": "tools/morphadapt_trace.py",
+      "expected_sha256": "76c70c81a22e5e470d1340d7dc3c5fe7e1ff1950fef0c56f48c74fdb5bac0029",
+      "actual_sha256": "5f7ee131845b0cbf815fcff14e9cb499c8d39fb6082ec7941e3dc108474290e1"
+    }
+  ],
+  "local_evidence_scope": "mock assets/states, original ActorCritic and RMS serialization, AST/numerical legacy regression; no simulator/training",
+  "requested_env_steps": 10000000,
+  "effective_env_steps_target": 9994240
+}
