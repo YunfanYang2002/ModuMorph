@@ -39,6 +39,53 @@ def pair(payload):
     return {"episode": payload, "walker_record": walker}
 
 
+def write_reference_fixture(root, contract):
+    for folder in ("manifests", "raw", "commands"):
+        (root / folder).mkdir(parents=True, exist_ok=True)
+    checkpoint, config = root / "checkpoint.pt", root / "config.yaml"
+    checkpoint.write_bytes(b"checkpoint")
+    config.write_text("config\n", encoding="utf-8")
+    run = {"seed": "1409", "method": "state_action", "checkpoint": str(checkpoint),
+           "checkpoint_sha256": regression.sha(checkpoint), "config": str(config),
+           "config_sha256": regression.sha(config), "training_manifest": "unused"}
+    with (root / "manifests/canonical_runs.tsv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=run, delimiter="\t")
+        writer.writeheader()
+        writer.writerow(run)
+    walkers = (ROOT / "configs/modumorph_strict_ood97.txt").read_text(encoding="utf-8").splitlines()
+    fields = ("walker_id", "family", "walker_xml", "walker_xml_sha256", "xml_cluster_id", "xml_cluster_size")
+    with (root / "manifests/strict_ood97_identity.tsv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t")
+        writer.writeheader()
+        for index, walker in enumerate(walkers):
+            writer.writerow({"walker_id": walker, "family": "floor", "walker_xml": "unused",
+                "walker_xml_sha256": "xml", "xml_cluster_id": f"cluster-{min(index, 86)}", "xml_cluster_size": "1"})
+    walker = walkers[0]
+    walker_record = {"return": {"mean": 1.0}, "length": {"mean": 300.0},
+        "seeds": {"1409": {"returns": [1.0], "lengths": [300],
+            "dynamics": [{"motor_strength": 1.0, "friction": 1.0, "mass": 1.0}],
+            "recovery": [{"parameters": {"motor_strength": 0.6, "friction": 0.4, "mass": 1.4}}],
+            "adaptation": [{"pnp": 0.7, "nar": 0.2}]}},
+        "recovery": {"count": 1}, "adaptation": {"count": 1}}
+    result_path = root / "raw/reference.json"
+    result = {"checkpoint_sha256": run["checkpoint_sha256"], "config_sha256": run["config_sha256"],
+        "seeds": [1409], "mid_episode_perturbation": {"enabled": True, "step": 250},
+        "protocols": {"ood_strong": {"per_walker": {walker: walker_record}}}}
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+    command = ["python", "-u", "tools/evaluate_dynamics.py", "--cfg", str(config), "--checkpoint", str(checkpoint),
+        "--walkers-file", "walkers.txt", "--protocols", "nominal,id,ood_mild,ood_strong", "--seeds", "1409",
+        "--episodes-per-walker", "1", "--max-steps-per-walker", "1000", "--out", str(result_path),
+        "--mid-episode-perturbation", "--mid-episode-step", "250", "ENV.WALKER_DIR", str(root / "walker-root"),
+        "DYNAMICS.RECOVERY_BASELINE_WINDOW", "25", "DYNAMICS.RECOVERY_THRESHOLD_FRACTION", "0.8",
+        "DYNAMICS.RECOVERY_MIN_BASELINE", "0.05", "DYNAMICS.RECOVERY_SUSTAIN_STEPS", "25",
+        "DYNAMICS.MID_EPISODE_MOTOR_STRENGTH_RANGE", "[0.6, 1.4]",
+        "DYNAMICS.MID_EPISODE_FRICTION_RANGE", "[0.4, 1.6]", "DYNAMICS.MID_EPISODE_MASS_RANGE", "[0.6, 1.4]"]
+    rendered = [{"seed": 1409, "method": "state_action", "setting": "mutation", "raw": str(result_path), "command": command}]
+    (root / "commands/rendered_commands.json").write_text(json.dumps(rendered), encoding="utf-8")
+    (root / "commands/reference.sh").write_text("python tools/evaluate_dynamics.py\n", encoding="utf-8")
+    return run, walker, walker_record, result_path
+
+
 class ProvenanceContractTests(unittest.TestCase):
     def setUp(self):
         self.contract = regression.load_json(regression.CONTRACT_PATH)
@@ -62,21 +109,31 @@ class ProvenanceContractTests(unittest.TestCase):
     def test_continuous_trace_and_metrics_accept_strict_roundoff(self):
         reference = pair(episode())
         candidate = copy.deepcopy(reference)
-        candidate["episode"]["steps"][0]["step_reward"] += 1e-12
-        candidate["episode"]["steps"][0]["policy_action"][1] += 1e-12
-        candidate["episode"]["adaptation"]["pnp"] += 1e-12
         candidate["walker_record"]["return"]["mean"] += 1e-12
-        statistics = regression.compare(reference, candidate, self.contract)
-        self.assertIn("trace.step_reward", statistics)
-        self.assertIn("trace.policy_action", statistics)
-        self.assertIn("formal.per_walker", statistics)
+        candidate["walker_record"]["adaptation"]["pnp"] += 1e-12
+        statistics = regression.compare_raw(reference["walker_record"], candidate["walker_record"], self.contract)
+        self.assertIn("raw.per_walker", statistics)
 
     def test_continuous_1e8_mismatch_is_rejected_with_path(self):
         reference = pair(episode())
         candidate = copy.deepcopy(reference)
-        candidate["episode"]["steps"][0]["measured_forward_velocity"] += 1e-8
-        with self.assertRaisesRegex(AssertionError, r"episode.steps\[0\].*measured_forward_velocity.*abs=.*rel="):
-            regression.compare(reference, candidate, self.contract)
+        candidate["walker_record"]["return"]["mean"] += 1e-8
+        with self.assertRaisesRegex(AssertionError, r"raw.per_walker.*mean.*abs=.*rel="):
+            regression.compare_raw(reference["walker_record"], candidate["walker_record"], self.contract)
+
+    def test_raw_discrete_mismatch_is_rejected(self):
+        reference = pair(episode())["walker_record"]
+        for path in ("length", "count", "null"):
+            candidate = copy.deepcopy(reference)
+            if path == "length":
+                candidate["seeds"]["1409"]["lengths"][0] += 1
+            elif path == "count":
+                candidate["recovery"]["recovered"] = False
+            else:
+                candidate["adaptation"]["missing"] = None
+                reference["adaptation"]["missing"] = "missing"
+            with self.subTest(path=path), self.assertRaises(AssertionError):
+                regression.compare_raw(reference, candidate, self.contract)
 
     def test_level_a_fields_are_exact(self):
         mutations = (("episode_length", 2), ("mutation", {**episode()["mutation"], "motor_strength": 0.600000000001}))
@@ -85,18 +142,18 @@ class ProvenanceContractTests(unittest.TestCase):
             candidate = copy.deepcopy(reference)
             candidate["episode"][key] = value
             with self.subTest(key=key), self.assertRaises(AssertionError):
-                regression.compare(reference, candidate, self.contract)
+                regression.compare_trace(reference, candidate, self.contract)
         for key, value in (("terminated", False), ("truncated", True), ("timestep", 1)):
             reference = pair(episode())
             candidate = copy.deepcopy(reference)
             candidate["episode"]["steps"][0][key] = value
             with self.subTest(key=key), self.assertRaises(AssertionError):
-                regression.compare(reference, candidate, self.contract)
+                regression.compare_trace(reference, candidate, self.contract)
         reference = pair(episode())
         candidate = copy.deepcopy(reference)
         candidate["episode"]["identity"]["method"] = "state_only"
         with self.assertRaisesRegex(AssertionError, "State.Action MorphAdapt"):
-            regression.compare(reference, candidate, self.contract)
+            regression.compare_trace(reference, candidate, self.contract)
 
     def test_null_structure_and_nonfinite_are_rejected(self):
         reference = pair(episode())
@@ -104,7 +161,27 @@ class ProvenanceContractTests(unittest.TestCase):
             candidate = copy.deepcopy(reference)
             candidate["episode"]["steps"][0]["step_reward"] = value
             with self.subTest(value=value), self.assertRaises(AssertionError):
-                regression.compare(reference, candidate, self.contract)
+                    regression.compare_trace(reference, candidate, self.contract)
+
+    def test_candidate_trace_proves_mutation_step_250(self):
+        payload = episode()
+        payload["episode_length"] = 250
+        payload["steps"] = [copy.deepcopy(payload["steps"][0]) for _ in range(250)]
+        for index, step in enumerate(payload["steps"]):
+            step["timestep"] = index
+            step["terminated"] = index == 249
+        payload["steps"][249]["mutation_applied"] = True
+        payload["steps"][249]["mutation_parameters"] = copy.deepcopy(payload["mutation"])
+        reference = {"walker": "walker-a", "run": {"checkpoint_sha256": "checkpoint", "config_sha256": "config"}}
+        regression.validate_candidate_trace(payload, reference, self.contract)
+        for change in ("step", "event"):
+            invalid = copy.deepcopy(payload)
+            if change == "step":
+                invalid["mutation"]["step"] = 251
+            else:
+                invalid["steps"][249]["mutation_applied"] = False
+            with self.subTest(change=change), self.assertRaises(AssertionError):
+                regression.validate_candidate_trace(invalid, reference, self.contract)
 
     def test_source_tree_gate_rejects_changed_content(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "tmp") as directory:
@@ -117,46 +194,46 @@ class ProvenanceContractTests(unittest.TestCase):
             target.write_text("arbitrary head\n", encoding="utf-8")
             self.assertEqual(set(regression.verify_source_tree(root, expected)), {"tools/evaluate_dynamics.py"})
 
-    def test_reference_selection_skips_episode_before_mutation(self):
+    def test_raw_reference_selection_does_not_require_trace(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "tmp") as directory:
             root = Path(directory)
-            for folder in ("manifests", "raw", "traces/early", "traces/eligible"):
-                (root / folder).mkdir(parents=True, exist_ok=True)
-            checkpoint, config = root / "checkpoint.pt", root / "config.yaml"
-            checkpoint.write_bytes(b"checkpoint")
-            config.write_text("config\n", encoding="utf-8")
-            run = {"seed": "1409", "method": "state_action", "checkpoint": str(checkpoint),
-                   "checkpoint_sha256": regression.sha(checkpoint), "config": str(config),
-                   "config_sha256": regression.sha(config), "training_manifest": "unused"}
-            with (root / "manifests/canonical_runs.tsv").open("w", encoding="utf-8", newline="") as handle:
-                writer = csv.DictWriter(handle, fieldnames=run, delimiter="\t")
-                writer.writeheader()
-                writer.writerow(run)
-            with (root / "manifests/strict_ood97_identity.tsv").open("w", encoding="utf-8", newline="") as handle:
-                writer = csv.DictWriter(handle, fieldnames=("walker_id", "family", "walker_xml", "walker_xml_sha256",
-                                                               "xml_cluster_id", "xml_cluster_size"), delimiter="\t")
-                writer.writeheader()
-                writer.writerow({"walker_id": "walker-a", "family": "floor", "walker_xml": "unused",
-                    "walker_xml_sha256": "xml", "xml_cluster_id": "cluster", "xml_cluster_size": "1"})
-            eligible = episode()
-            eligible["identity"]["checkpoint_sha256"] = run["checkpoint_sha256"]
-            eligible["identity"]["config_sha256"] = run["config_sha256"]
-            eligible["episode_length"] = 250
-            eligible["steps"] = [copy.deepcopy(eligible["steps"][0]) for _ in range(250)]
-            for index, step in enumerate(eligible["steps"]):
-                step["timestep"] = index
-            early = copy.deepcopy(eligible)
-            early["episode_length"], early["steps"], early["mutation"] = 100, early["steps"][:100], None
-            (root / "traces/early/episodes.jsonl").write_text(json.dumps(early) + "\n", encoding="utf-8")
-            target = root / "traces/eligible/episodes.jsonl"
-            target.write_text(json.dumps(eligible) + "\n", encoding="utf-8")
-            result = {"checkpoint_sha256": run["checkpoint_sha256"], "config_sha256": run["config_sha256"],
-                      "protocols": {"ood_strong": {"per_walker": {"walker-a": pair(eligible)["walker_record"]}}}}
-            (root / "raw/reference.json").write_text(json.dumps(result), encoding="utf-8")
-            selected = regression.select_reference(root, root / "traces", self.contract)
-            self.assertEqual(selected["trace_path"], target)
-            self.assertEqual(selected["walker"], "walker-a")
-            self.assertEqual(selected["candidate_count"], 1)
+            run, walker, walker_record, result_path = write_reference_fixture(root, self.contract)
+            selected = regression.select_reference(root, self.contract)
+            self.assertEqual(selected["result_path"], result_path)
+            self.assertEqual(selected["walker"], walker)
+            self.assertEqual(selected["walker_record"], walker_record)
+            self.assertEqual(selected["selection_basis"], "raw seed recovery/adaptation event")
+            self.assertTrue(selected["mutation_parameters_available"])
+            self.assertIsNone(regression.find_optional_trace(None, selected, self.contract))
+
+    def test_raw_reference_rejects_wrong_authority_fields(self):
+        for field in ("checkpoint", "config", "protocol", "setting"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory(dir=ROOT / "tmp") as directory:
+                root = Path(directory)
+                run, walker, _, result_path = write_reference_fixture(root, self.contract)
+                result = json.loads(result_path.read_text())
+                if field == "checkpoint":
+                    result["checkpoint_sha256"] = "wrong"
+                elif field == "config":
+                    result["config_sha256"] = "wrong"
+                elif field == "protocol":
+                    result["protocols"] = {"id": result["protocols"]["ood_strong"]}
+                else:
+                    result["mid_episode_perturbation"]["enabled"] = False
+                result_path.write_text(json.dumps(result), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    regression.select_reference(root, self.contract)
+
+    def test_raw_reference_rejects_walker_outside_strict_ood97(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "tmp") as directory:
+            root = Path(directory)
+            _, walker, _, result_path = write_reference_fixture(root, self.contract)
+            result = json.loads(result_path.read_text())
+            record = result["protocols"]["ood_strong"]["per_walker"].pop(walker)
+            result["protocols"]["ood_strong"]["per_walker"]["outside-walker"] = record
+            result_path.write_text(json.dumps(result), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "no Strict-OOD97 walker"):
+                regression.select_reference(root, self.contract)
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ Candidate authority requires a server replay against existing canonical evidence
 
 ## Prepared server workflow
 
-`scripts/run_modumorph_evaluator_behavior_regression_server.sh` creates or verifies the detached worktree under `./tmp/rmamorph_behavior_regression_3893388`, selects an eligible existing reference trace, replays exactly one existing Table 2 State+Action episode, compares it, and packages logs/results on success or failure. It never modifies or commits the rmamorph working tree, never generates the reference, and never launches ModuMorph training or the full Strict-OOD97 matrix.
+`scripts/run_modumorph_evaluator_behavior_regression_server.sh` creates or verifies the detached worktree under `./tmp/rmamorph_behavior_regression_3893388`, selects an eligible walker from an existing authoritative canonical Table 2 raw result, replays exactly that Table 2 cell for one walker, compares the full raw per-walker record, and packages logs/results on success or failure. A historical trace is optional; the candidate creates its own diagnostic trace to prove that mutation fired at step 250. The workflow never modifies or commits the rmamorph working tree, never regenerates the reference, and never launches ModuMorph training or the full Strict-OOD97 matrix.
 
 Current status:
 

@@ -2,15 +2,11 @@
 
 ## Frozen claim and case selection
 
-This regression tests behavior equivalence rather than source-byte equality. The runner reads the existing canonical `canonical_runs.tsv`, requires training seed 1409 and method `state_action`, validates the recorded checkpoint and config SHA256, and searches an authoritative existing trace root. It selects the first deterministic Strict-OOD97 episode satisfying all of:
+This regression tests behavior equivalence rather than source-byte equality. The runner reads the existing canonical `canonical_runs.tsv`, requires training seed 1409 and method `state_action`, and validates the recorded checkpoint and config SHA256. It then binds the unique rendered mutation command to its existing raw result by content and path, without guessing from the result filename.
 
-- evaluation seed 1409;
-- protocol `ood_strong` and setting `mutation`;
-- mutation recorded at step 250;
-- episode length and trace length at least 250 and mutually equal;
-- trace checkpoint/config hashes equal the canonical manifest.
+The raw result must record evaluation seed 1409, contain protocol `ood_strong`, enable mutation at step 250, and match the canonical checkpoint/config hashes. The first Strict-OOD97 walker with one episode and a nonempty recovery/adaptation event is selected. If those event fields cannot prove mutation inclusion, authoritative episode length at least 250 is the minimum selection gate and is recorded as the selection basis. Missing episode length fails loudly.
 
-An early-terminated trace that did not reach the mutation is ineligible. No new reference is generated. The selected walker must have exactly one row in `strict_ood97_identity.tsv`, and its runtime XML must match the recorded SHA256.
+No historical trace is required and no new reference is generated. The selected walker must have exactly one row in the bound 97-walker/87-cluster `strict_ood97_identity.tsv`, and its runtime XML must match the recorded SHA256. The reference record stores the raw result, rendered command, checkpoint, config and walker XML paths and hashes.
 
 ## Candidate execution
 
@@ -18,16 +14,19 @@ The runner reconstructs commit `3893388b79b0df4b10ad3cd8504258618947325c` as a d
 
 ## Acceptance contract
 
-The following are exact: walker/seed/protocol/setting/checkpoint/config identity, episode length, number of trace steps, all dictionary keys and null structure, mutation record and sampled parameters, timestep, mutation flags, termination/truncation flags, strings, integers and booleans.
+The primary comparison recursively covers the entire authoritative `per_walker[walker]` raw record. Dictionary keys, list lengths, null structure, booleans, integers, episode/event counts, episode lengths and discrete recovery/relapse fields are exact. Every float in that record uses fixed `rtol=1e-10`, `atol=1e-10`, including return, PNP, NAR, RMRT, retention, normalized drop and recovery summaries when present.
 
-Floating trace values use fixed `rtol=1e-10`, `atol=1e-10`: reward, measured forward velocity, recovery performance, policy action, Student latent/action-history fields when present, and any recorded physical context. Formal per-walker result data and episode recovery/adaptation metrics use the same fixed tolerance for floats while preserving all discrete and null structure. A failure reports the first exact recursive path plus actual, expected, absolute difference and relative difference. A PASS reports maximum absolute and relative differences by field group.
+The candidate trace must prove that mutation actually fired at step 250 and that the trace reached that transition. If an explicitly supplied historical trace matches the same canonical identity, trace-level reward, velocity, action and other continuous fields are additionally compared at the same fixed tolerance. Its absence produces `TRACE_LEVEL_REGRESSION=NOT_AVAILABLE` and does not block raw regression. A raw failure reports the first recursive path plus actual, expected, absolute difference and relative difference. A PASS reports maximum absolute and relative differences.
 
 ## Current evidence status
 
 Local tests validate source-gate behavior and comparison rules using fixtures. No MuJoCo replay was run locally, and Codex did not access the server.
 
 ```text
+REFERENCE_AUTHORITY=CANONICAL_TABLE2_RAW_RESULT
 BEHAVIOR_REGRESSION_REFERENCE=NOT_SELECTED_SERVER_REQUIRED
+PREVIOUS_REGRESSION_ATTEMPT=REFERENCE_SELECTION_BLOCKED
+BEHAVIOR_REPLAY_EXECUTED=NO
 REPRODUCIBLE_CANDIDATE_SHA=3893388b79b0df4b10ad3cd8504258618947325c
 FROZEN_EVALUATOR_BEHAVIOR_REGRESSION=NOT_RUN
 BINDING_CONTRACT_REPAIRED=NO
@@ -42,4 +41,4 @@ From the activated server environment, run only:
 bash scripts/run_modumorph_evaluator_behavior_regression_server.sh 2 --no-keep-open
 ```
 
-The default reference is the adjacent rmamorph `tmp/morphadapt_canonical_student_formal_table2_20260905T111437Z`. If its authoritative trace evidence is stored separately, pass `--trace-root <AUTHORITATIVE_EXISTING_TRACE_ROOT>`; do not point this option at a newly generated or diagnostic trace. Success requires `FROZEN_EVALUATOR_BEHAVIOR_REGRESSION=PASS` and `RUN_EXIT_CODE=0`. Return the printed `OUTPUT_ZIP` for review before changing the binding or running the ModuMorph 245K smoke.
+The default reference is the adjacent rmamorph `tmp/morphadapt_canonical_student_formal_table2_20260905T111437Z`. Historical trace comparison is disabled by default and is not required. Success requires `FROZEN_EVALUATOR_BEHAVIOR_REGRESSION=PASS` and `RUN_EXIT_CODE=0`. Return the printed `OUTPUT_ZIP` for review before changing the binding or running the ModuMorph 245K smoke.
