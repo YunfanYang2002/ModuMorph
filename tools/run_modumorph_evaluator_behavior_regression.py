@@ -372,11 +372,17 @@ def main():
     expected_sources = source_expectations(contract, binding)
     if binding["source_reference_sha"] != contract["candidate_sha"]:
         raise ValueError("binding and behavior candidate commit disagree")
-    if binding["source_sha256"] | contract["candidate_source_sha256"] != expected_sources:
-        raise AssertionError("candidate source expectation construction failed")
+    if binding["source_sha256"] != expected_sources:
+        raise AssertionError("repaired binding does not match candidate source expectations")
     transient = contract["superseded_transient_hashes"]
-    if contract["table2_authority_for_transient_hashes"] or any(binding["source_sha256"].get(k) != v for k, v in transient.items()):
-        raise ValueError("transient provenance declaration disagrees with preserved binding history")
+    if contract["table2_authority_for_transient_hashes"]:
+        raise ValueError("transient hashes cannot be Table 2 authority")
+    if binding.get("superseded_transient_hashes") != transient:
+        raise ValueError("repaired binding does not preserve transient hash history")
+    if binding.get("transient_hash_recovery") != "not_recoverable":
+        raise ValueError("repaired binding has invalid transient hash recovery status")
+    if binding.get("source_authority") != "reproducible_git_source_plus_behavior_regression":
+        raise ValueError("repaired binding has invalid source authority")
     git_mismatches = verify_git_source(args.rmamorph_root, contract["candidate_sha"], expected_sources)
     if git_mismatches:
         raise ValueError("candidate commit source gate failed: " + json.dumps(git_mismatches, sort_keys=True))

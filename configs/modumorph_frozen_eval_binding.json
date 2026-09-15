@@ -1,11 +1,12 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "scope": "Frozen Strict-OOD97 Table 2; static policy backend only",
   "source_reference_sha": "3893388b79b0df4b10ad3cd8504258618947325c",
+  "source_authority": "reproducible_git_source_plus_behavior_regression",
   "source_sha256": {
-    "tools/evaluate_dynamics.py": "88fc1581ff077fe861ea463c6d634be552b4be63e9c76c64e77474ce595ac1ff",
+    "tools/evaluate_dynamics.py": "035a4c783839c0ac2016a87025a929fe47c62038be8de3162bf51574f5ebbdc4",
     "tools/evaluate_v1.py": "3071dd0d09071b017aed08b420d71e0173943e758c8be87a0db39254d257a0f1",
-    "tools/morphadapt_trace.py": "76c70c81a22e5e470d1340d7dc3c5fe7e1ff1950fef0c56f48c74fdb5bac0029",
+    "tools/morphadapt_trace.py": "5fbe749bfa5bda14ff176b67524b0d17c910007886f520ea279649d680aa9982",
     "tools/morphadapt_previous_action_intervention.py": "ba7e0129538f18f02341898ae7f17df74df57841031f5d56c953c93fd676ea8a",
     "tools/prepare_morphadapt_canonical_student_formal_table2.py": "f1d6c4238c5abd13393b2e30ae11b207b765eaa602d4a3937073c6e655846176",
     "tools/reaggregate_morphadapt_strict_ood97.py": "1d012eefac797e42103ffa0b7130f0eecd62666f6418d4b083ba7eced7f6f022",
@@ -31,6 +32,28 @@
     "metamorph/utils/xml.py": "e757e53d3d8f21f046a290cd4ff8d275462cef4b143932d281349ef6adb2f83d",
     "metamorph/envs/assets/unimal.xml": "045ea60b10bd0d717c65e03a3c0d79f8ca67aadb42f5499a29e7029b388db124",
     "configs/morphadapt_metamorph_dr_formal_ood98.txt": "3bb2219209b79e1c1e37dbbfd04327eb28db66bf12db97cdc1d4cadf46179c04"
+  },
+  "superseded_transient_hashes": {
+    "tools/evaluate_dynamics.py": "88fc1581ff077fe861ea463c6d634be552b4be63e9c76c64e77474ce595ac1ff",
+    "tools/morphadapt_trace.py": "76c70c81a22e5e470d1340d7dc3c5fe7e1ff1950fef0c56f48c74fdb5bac0029"
+  },
+  "transient_hash_recovery": "not_recoverable",
+  "table2_authority_for_transient_hashes": false,
+  "behavior_regression_evidence": {
+    "authority_artifact": "./tmp/modumorph_evaluator_behavior_regression/binding_repair_proposal.json",
+    "report_artifact": "./tmp/modumorph_evaluator_behavior_regression/report.json",
+    "reference_authority": "CANONICAL_TABLE2_RAW_RESULT",
+    "reproducible_evaluator_source": "3893388b79b0df4b10ad3cd8504258618947325c",
+    "frozen_evaluator_behavior_regression": "PASS",
+    "reference_selection": "PASS",
+    "candidate_replay_executed": "YES",
+    "candidate_mutation_step_250": "PASS",
+    "raw_structure_regression": "PASS",
+    "raw_discrete_regression": "PASS",
+    "raw_continuous_regression": "PASS",
+    "max_abs_diff": 0.0,
+    "max_rel_diff": 0.0,
+    "source_integrity_gate_preserved": "YES"
   },
   "environment_config": "configs/morphadapt_metamorph_dr_matched_s1409_reference.yaml",
   "environment_config_sha256": "b262a891bc5b7b20225da27af27839b2a39f2815461b6b6695166f18bd8ae622",

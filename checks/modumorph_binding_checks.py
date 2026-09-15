@@ -273,12 +273,16 @@ class RunnerEvidenceTests(unittest.TestCase):
         counterpart = ROOT.parent / "rmamorph"
         for name, digest in contract["source_sha256"].items():
             actual = runner.source_sha(counterpart / name)
-            if name in regression["superseded_transient_hashes"]:
+            if name in regression["candidate_source_sha256"]:
+                self.assertEqual(digest, regression["candidate_source_sha256"][name], name)
                 self.assertNotEqual(actual, digest, name)
             else:
                 self.assertEqual(actual, digest, name)
         self.assertFalse(regression["table2_authority_for_transient_hashes"])
-        self.assertEqual(regression["candidate_authority_status"], "pending_behavior_regression")
+        self.assertEqual(contract["superseded_transient_hashes"], regression["superseded_transient_hashes"])
+        self.assertEqual(contract["transient_hash_recovery"], "not_recoverable")
+        self.assertEqual(contract["source_authority"], "reproducible_git_source_plus_behavior_regression")
+        self.assertEqual(regression["candidate_authority_status"], "approved_behavior_regression_pass")
         self.assertEqual(contract["formal_evaluation"]["episodes_per_walker"], 1)
         self.assertEqual(contract["evaluation_seeds"], [1409])
         tree = ast.parse((ROOT / "tools/run_modumorph_frozen_eval.py").read_text())

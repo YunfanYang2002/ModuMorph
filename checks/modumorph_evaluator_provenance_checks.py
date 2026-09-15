@@ -95,9 +95,15 @@ class ProvenanceContractTests(unittest.TestCase):
         self.assertFalse(self.contract["table2_authority_for_transient_hashes"])
         self.assertEqual(self.contract["transient_hash_recovery"], "not_recoverable")
         for name, digest in self.contract["superseded_transient_hashes"].items():
-            self.assertEqual(self.binding["source_sha256"][name], digest)
-            self.assertNotEqual(self.contract["candidate_source_sha256"][name], digest)
-        self.assertEqual(self.contract["candidate_authority_status"], "pending_behavior_regression")
+            self.assertEqual(self.binding["superseded_transient_hashes"][name], digest)
+            self.assertEqual(self.binding["source_sha256"][name], self.contract["candidate_source_sha256"][name])
+            self.assertNotEqual(self.binding["source_sha256"][name], digest)
+        self.assertEqual(self.binding["source_authority"], "reproducible_git_source_plus_behavior_regression")
+        self.assertEqual(self.contract["candidate_authority_status"], "approved_behavior_regression_pass")
+        self.assertEqual(self.binding["behavior_regression_evidence"],
+                         self.contract["approved_behavior_regression_evidence"] |
+                         {"reproducible_evaluator_source": self.contract["candidate_sha"],
+                          "frozen_evaluator_behavior_regression": "PASS"})
 
     def test_3893388_git_source_gate_passes_and_current_drift_fails(self):
         counterpart = ROOT.parent / "rmamorph"

@@ -18,27 +18,24 @@ The primary comparison recursively covers the entire authoritative `per_walker[w
 
 The candidate trace must prove that mutation actually fired at step 250 and that the trace reached that transition. If an explicitly supplied historical trace matches the same canonical identity, trace-level reward, velocity, action and other continuous fields are additionally compared at the same fixed tolerance. Its absence produces `TRACE_LEVEL_REGRESSION=NOT_AVAILABLE` and does not block raw regression. A raw failure reports the first recursive path plus actual, expected, absolute difference and relative difference. A PASS reports maximum absolute and relative differences.
 
-## Current evidence status
+## Reviewed server evidence
 
-Local tests validate source-gate behavior and comparison rules using fixtures. No MuJoCo replay was run locally, and Codex did not access the server.
+The server behavior regression completed against the canonical Table 2 raw result. The candidate replay executed from the clean `3893388` source, reached the mutation at step 250, and matched the authoritative raw record exactly. The approved repair proposal and report remain under `./tmp/modumorph_evaluator_behavior_regression/` on the server.
 
 ```text
 REFERENCE_AUTHORITY=CANONICAL_TABLE2_RAW_RESULT
-BEHAVIOR_REGRESSION_REFERENCE=NOT_SELECTED_SERVER_REQUIRED
-PREVIOUS_REGRESSION_ATTEMPT=REFERENCE_SELECTION_BLOCKED
-BEHAVIOR_REPLAY_EXECUTED=NO
+REFERENCE_SELECTION=PASS
+CANDIDATE_REPLAY_EXECUTED=YES
 REPRODUCIBLE_CANDIDATE_SHA=3893388b79b0df4b10ad3cd8504258618947325c
-FROZEN_EVALUATOR_BEHAVIOR_REGRESSION=NOT_RUN
-BINDING_CONTRACT_REPAIRED=NO
+CANDIDATE_MUTATION_STEP_250=PASS
+RAW_STRUCTURE_REGRESSION=PASS
+RAW_DISCRETE_REGRESSION=PASS
+RAW_CONTINUOUS_REGRESSION=PASS
+MAX_ABS_DIFF=0.0
+MAX_REL_DIFF=0.0
+FROZEN_EVALUATOR_BEHAVIOR_REGRESSION=PASS
+BINDING_CONTRACT_REPAIRED=YES
 SOURCE_INTEGRITY_GATE_PRESERVED=YES
-MODUMORPH_245K_SMOKE_READY=NO
+MODUMORPH_245K_SMOKE_READY=YES
 FORMAL_MODUMORPH_EVAL_READY=NO
 ```
-
-From the activated server environment, run only:
-
-```bash
-bash scripts/run_modumorph_evaluator_behavior_regression_server.sh 2 --no-keep-open
-```
-
-The default reference is the adjacent rmamorph `tmp/morphadapt_canonical_student_formal_table2_20260905T111437Z`. Historical trace comparison is disabled by default and is not required. Success requires `FROZEN_EVALUATOR_BEHAVIOR_REGRESSION=PASS` and `RUN_EXIT_CODE=0`. Return the printed `OUTPUT_ZIP` for review before changing the binding or running the ModuMorph 245K smoke.
