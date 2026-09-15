@@ -269,9 +269,16 @@ class RunnerEvidenceTests(unittest.TestCase):
         import json
         import run_modumorph_frozen_eval as runner
         contract = json.loads((ROOT / "configs/modumorph_frozen_eval_binding.json").read_text())
+        regression = json.loads((ROOT / "configs/modumorph_evaluator_behavior_regression.json").read_text())
         counterpart = ROOT.parent / "rmamorph"
         for name, digest in contract["source_sha256"].items():
-            self.assertEqual(runner.source_sha(counterpart / name), digest, name)
+            actual = runner.source_sha(counterpart / name)
+            if name in regression["superseded_transient_hashes"]:
+                self.assertNotEqual(actual, digest, name)
+            else:
+                self.assertEqual(actual, digest, name)
+        self.assertFalse(regression["table2_authority_for_transient_hashes"])
+        self.assertEqual(regression["candidate_authority_status"], "pending_behavior_regression")
         self.assertEqual(contract["formal_evaluation"]["episodes_per_walker"], 1)
         self.assertEqual(contract["evaluation_seeds"], [1409])
         tree = ast.parse((ROOT / "tools/run_modumorph_frozen_eval.py").read_text())

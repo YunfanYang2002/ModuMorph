@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "candidate_sha": "3893388b79b0df4b10ad3cd8504258618947325c",
+  "candidate_source_sha256": {
+    "tools/evaluate_dynamics.py": "035a4c783839c0ac2016a87025a929fe47c62038be8de3162bf51574f5ebbdc4",
+    "tools/morphadapt_trace.py": "5fbe749bfa5bda14ff176b67524b0d17c910007886f520ea279649d680aa9982"
+  },
+  "superseded_transient_hashes": {
+    "tools/evaluate_dynamics.py": "88fc1581ff077fe861ea463c6d634be552b4be63e9c76c64e77474ce595ac1ff",
+    "tools/morphadapt_trace.py": "76c70c81a22e5e470d1340d7dc3c5fe7e1ff1950fef0c56f48c74fdb5bac0029"
+  },
+  "transient_hash_recovery": "not_recoverable",
+  "table2_authority_for_transient_hashes": false,
+  "candidate_authority_status": "pending_behavior_regression",
+  "training_seed": 1409,
+  "method": "state_action",
+  "evaluation_seed": 1409,
+  "protocol": "ood_strong",
+  "setting": "mutation",
+  "episodes_per_walker": 1,
+  "max_steps_per_walker": 1000,
+  "mutation_step": 250,
+  "continuous_rtol": 1e-10,
+  "continuous_atol": 1e-10
+}
